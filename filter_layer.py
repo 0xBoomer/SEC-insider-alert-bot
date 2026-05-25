@@ -20,6 +20,7 @@ import requests
 import yfinance as yf
 
 from edgar_poller import fetch_recent_form4_accessions, _parse_form4, HEADERS, REQUEST_DELAY
+from comp_lookup import get_executive_comp
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +170,22 @@ def _get_cluster_insiders(ticker, issuer_cik, today_txns):
     return insiders
 
 
+def get_comp(issuer_cik, filer_name, title):
+    """
+    Return annual compensation for an insider.
+
+    Tries in order:
+      1. Real comp from EDGAR DEF 14A proxy filing (most accurate)
+      2. Keyword estimate table by title (fallback)
+
+    Always returns a positive float.
+    """
+    real_comp = get_executive_comp(issuer_cik, filer_name)
+    if real_comp:
+        return real_comp
+    return estimate_annual_comp(title)
+
+
 def estimate_annual_comp(title):
     """
     Map an officer/director title to an estimated annual compensation figure.
@@ -184,12 +201,12 @@ def estimate_annual_comp(title):
 def _is_significant_purchase(txn):
     """
     Return True if either:
-      (a) purchase value > 5% of estimated annual comp, OR
+      (a) purchase value > 5% of annual comp (real from DEF 14A, or estimated), OR
       (b) shares purchased increase the insider's position by ≥ 10%
 
     If shares_before == 0 (new stake), any purchase qualifies under (b).
     """
-    comp = estimate_annual_comp(txn["officer_title"])
+    comp = get_comp(txn["issuer_cik"], txn["filer_name"], txn["officer_title"])
     value_pct_of_comp = txn["total_value"] / comp
 
     if value_pct_of_comp >= MIN_VALUE_PCT_OF_COMP:

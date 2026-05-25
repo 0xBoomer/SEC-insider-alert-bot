@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-from filter_layer import estimate_annual_comp
+from filter_layer import get_comp
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +96,7 @@ def _score_purchase_quality(transactions):
     # Use the single largest purchase by value for this score
     best = max(transactions, key=lambda t: t["total_value"])
 
-    comp = estimate_annual_comp(best["officer_title"])
+    comp = get_comp(best["issuer_cik"], best["filer_name"], best["officer_title"])
     value_pct = best["total_value"] / comp
 
     # Value vs comp sub-score

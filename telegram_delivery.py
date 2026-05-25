@@ -134,9 +134,10 @@ def _format_message(ticker, ticker_data, score_result, survival_metrics):
 
     # ── Cluster summary ───────────────────────────────────────────────────────
     lines.append(f"📦 <b>Cluster: {cluster_size} insider(s) buying</b>")
+    issuer_cik = ticker_data.get("issuer_cik", "")
     for txn in sorted(transactions, key=lambda t: t["total_value"], reverse=True):
         role = txn["officer_title"] or ("Director" if txn["is_director"] else "Insider")
-        comp = _comp_label(txn["officer_title"])
+        comp, comp_label = _get_comp_with_label(issuer_cik, txn["filer_name"], txn["officer_title"])
         pct_of_comp = txn["total_value"] / comp * 100
 
         if txn["shares_before"] > 0:
@@ -150,7 +151,7 @@ def _format_message(ticker, ticker_data, score_result, survival_metrics):
             f"{txn['shares_purchased']:,.0f} sh "
             f"@ ${txn['price_per_share']:.2f} "
             f"= ${txn['total_value']:,.0f} "
-            f"({pct_of_comp:.0f}% of ~${comp:,.0f} comp{pos_str})"
+            f"({pct_of_comp:.0f}% of {comp_label}{pos_str})"
         )
 
     # ── Survival metrics ──────────────────────────────────────────────────────
@@ -205,7 +206,16 @@ def _format_message(ticker, ticker_data, score_result, survival_metrics):
     return "\n".join(lines)
 
 
-def _comp_label(title):
-    """Re-use the same comp estimate logic for message formatting."""
+def _get_comp_with_label(issuer_cik, filer_name, title):
+    """
+    Return (comp_value, label_string) for message formatting.
+    Label distinguishes real DEF 14A data from estimates.
+    """
+    from comp_lookup import get_executive_comp
     from filter_layer import estimate_annual_comp
-    return estimate_annual_comp(title)
+
+    real = get_executive_comp(issuer_cik, filer_name)
+    if real:
+        return real, f"${real:,.0f} comp (proxy)"
+    est = estimate_annual_comp(title)
+    return est, f"~${est:,.0f} comp (est)"
