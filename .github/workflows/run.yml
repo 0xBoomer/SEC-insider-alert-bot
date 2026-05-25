@@ -17,32 +17,32 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
         with:
           # Fetch full history so we can push processed.json changes
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5.6.0
         with:
           python-version: "3.11"
           cache: "pip"
-          cache-dependency-path: sec-insider-alert-bot/requirements.txt
+          cache-dependency-path: requirements.txt
 
       - name: Install dependencies
-        run: pip install -r sec-insider-alert-bot/requirements.txt
+        run: pip install -r requirements.txt
 
       - name: Run alert bot
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python sec-insider-alert-bot/main.py
+        run: python main.py
 
       - name: Commit updated processed.json
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add sec-insider-alert-bot/processed.json
+          git add processed.json
           # Only commit if the file actually changed
           git diff --staged --quiet || git commit -m "chore: update processed filings [skip ci]"
           git push
