@@ -97,10 +97,13 @@ def _date_quarters(start_date, end_date):
 
 # ── Public entry point ────────────────────────────────────────────────────────
 
-def fetch_form4_filings(days_back=1):
+def fetch_form4_filings(days_back=1, start_date=None, end_date=None):
     """
     Return a list of transaction dicts for every open-market purchase (code P)
-    filed in the last `days_back` calendar days.
+    in the given date range.
+
+    Pass explicit start_date/end_date (date objects) for historical runs.
+    Otherwise uses today minus days_back.
 
     Each dict contains:
         ticker, issuer_name, issuer_cik, filer_name, officer_title,
@@ -108,8 +111,10 @@ def fetch_form4_filings(days_back=1):
         total_value, shares_before, shares_after, transaction_date,
         filing_date, accession_no
     """
-    end_date = date.today()
-    start_date = end_date - timedelta(days=days_back)
+    if end_date is None:
+        end_date = date.today()
+    if start_date is None:
+        start_date = end_date - timedelta(days=days_back)
 
     logger.info(f"Scanning EDGAR Form 4 filings from {start_date} to {end_date}")
 
@@ -130,7 +135,10 @@ def fetch_form4_filings(days_back=1):
     logger.info(f"Parsing {min(len(filing_rows), MAX_FILINGS)} Form 4 filings…")
 
     transactions = []
-    for row in filing_rows[:MAX_FILINGS]:
+    total = min(len(filing_rows), MAX_FILINGS)
+    for i, row in enumerate(filing_rows[:MAX_FILINGS]):
+        if i > 0 and i % 1000 == 0:
+            print(f"  [{i}/{total}] parsed… {len(transactions)} open-market purchases so far", flush=True)
         cik = row["cik"]
         accession_no = row["accession_no"]
         filing_transactions = _parse_form4(cik, accession_no)
