@@ -73,9 +73,10 @@ def send_alert(ticker, ticker_data, score_result, survival_metrics):
         return False
 
 
-def send_summary(alert_count, skip_count, error_count):
+def send_summary(alert_count, skip_count, error_count, near_misses=None):
     """
     Send a brief end-of-run summary so you know the bot fired even on quiet days.
+    near_misses: list of (ticker, z_score, cluster_size, cap_m) tuples
     """
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
@@ -83,18 +84,24 @@ def send_summary(alert_count, skip_count, error_count):
     if not token or not chat_id:
         return False
 
+    total = alert_count + skip_count + error_count
     if alert_count == 0:
         msg = (
-            f"📋 <b>SEC Insider Bot — Daily Run Complete</b>\n"
-            f"No alerts today.  Scanned {alert_count + skip_count + error_count} "
-            f"candidate(s): {skip_count} filtered/skipped, {error_count} data error(s)."
+            f"📋 <b>SEC Insider Bot — Run Complete</b>\n"
+            f"No alerts today. Scanned {total} candidate(s): "
+            f"{skip_count} filtered/skipped, {error_count} data error(s)."
         )
     else:
         msg = (
-            f"📋 <b>SEC Insider Bot — Daily Run Complete</b>\n"
-            f"Sent <b>{alert_count}</b> alert(s).  "
+            f"📋 <b>SEC Insider Bot — Run Complete</b>\n"
+            f"Sent <b>{alert_count}</b> alert(s). "
             f"{skip_count} filtered out, {error_count} data error(s)."
         )
+
+    if near_misses:
+        msg += "\n\n⚠️ <b>Near-misses (Z 1.50–1.81 — check manually):</b>"
+        for ticker, z, cluster, cap_m in near_misses:
+            msg += f"\n  • ${ticker} — Z={z:.2f}, {cluster} insiders, ${cap_m:.1f}M cap"
 
     url = TELEGRAM_API.format(token=token)
     try:

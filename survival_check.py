@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 # ── Thresholds ────────────────────────────────────────────────────────────────
 MIN_ALTMAN_Z = 1.81      # Below this = financial distress zone
+NEAR_MISS_Z  = 1.50      # Z in [1.50, 1.81) = near-miss: flagged in summary, not alerted
 MIN_CURRENT_RATIO = 1.0  # Below this = can't cover short-term obligations
 DEBT_MATURITY_FLAG_PCT = 0.30  # Flag if >30% of debt matures in <12 months
 
@@ -156,6 +157,9 @@ def check_survival(ticker, market_cap):
             reject_reason = f"Current ratio {current_ratio:.2f} < {MIN_CURRENT_RATIO}"
         passes = False
 
+    near_miss = (not passes and reject_reason and "Altman Z" in reject_reason
+                 and NEAR_MISS_Z <= z_score < MIN_ALTMAN_Z)
+
     result = {
         "z_score": round(z_score, 2),
         "current_ratio": round(current_ratio, 2),
@@ -164,6 +168,7 @@ def check_survival(ticker, market_cap):
         "total_debt": total_debt,
         "passes": passes,
         "reject_reason": reject_reason,
+        "near_miss": near_miss,
     }
 
     if passes:

@@ -46,6 +46,7 @@ def run():
     alert_count = 0
     skip_count = 0
     error_count = 0
+    near_misses = []  # (ticker, z_score, cluster_size, cap_m)
 
     # ── Step 1: Load deduplication state ─────────────────────────────────────
     processed = deduplication.load_processed()
@@ -58,7 +59,7 @@ def run():
 
     if not transactions:
         logger.info("No transactions found — exiting")
-        telegram_delivery.send_summary(0, 0, 0)
+        telegram_delivery.send_summary(0, 0, 0, [])
         return
 
     # ── Step 3: Deduplicate ───────────────────────────────────────────────────
@@ -79,7 +80,7 @@ def run():
     if not new_transactions:
         logger.info("No new transactions — exiting")
         deduplication.save_processed(processed)
-        telegram_delivery.send_summary(0, 0, 0)
+        telegram_delivery.send_summary(0, 0, 0, [])
         return
 
     # ── Step 4: Filter layer ──────────────────────────────────────────────────
@@ -91,7 +92,7 @@ def run():
     if not filtered:
         logger.info("No tickers passed filters — exiting")
         deduplication.save_processed(processed)
-        telegram_delivery.send_summary(0, skip_count, 0)
+        telegram_delivery.send_summary(0, skip_count, 0, [])
         return
 
     # ── Steps 5–7: Survival check + scoring + delivery ────────────────────────
@@ -109,6 +110,10 @@ def run():
 
         if not survival["passes"]:
             logger.info(f"[{ticker}] Rejected by survival check: {survival['reject_reason']}")
+            if survival.get("near_miss"):
+                cap_m = ticker_data["market_cap"] / 1e6
+                near_misses.append((ticker, survival["z_score"], ticker_data["cluster_size"], cap_m))
+                logger.info(f"[{ticker}] Near-miss flagged (Z={survival['z_score']})")
             skip_count += 1
             continue
 
@@ -140,7 +145,7 @@ def run():
         f"Run complete — {alert_count} alert(s) sent, "
         f"{skip_count} filtered/below-threshold, {error_count} error(s)"
     )
-    telegram_delivery.send_summary(alert_count, skip_count, error_count)
+    telegram_delivery.send_summary(alert_count, skip_count, error_count, near_misses)
 
 
 if __name__ == "__main__":
