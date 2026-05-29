@@ -2,7 +2,7 @@
 filter_layer.py — Step 2: Hard filters applied before scoring.
 
 Four filters, all must pass:
-  1. Market cap < $500M  (small-cap focus — insiders have more edge here)
+  1. Market cap fetchable (no size cap — all market caps allowed)
   2. 2+ distinct insiders buying the same ticker within 30 days
   3. Purchase value > 5% of estimated annual compensation  OR  position +10%
   4. Not a routine same-quarter purchase vs prior year (rejects plan-driven buys)
@@ -25,7 +25,6 @@ from comp_lookup import get_executive_comp
 logger = logging.getLogger(__name__)
 
 # ── Tunable thresholds ────────────────────────────────────────────────────────
-MAX_MARKET_CAP = 500_000_000          # $500M hard cap
 MIN_CLUSTER_SIZE = 2                  # At least 2 unique insiders
 MIN_VALUE_PCT_OF_COMP = 0.05          # 5% of estimated annual comp
 MIN_POSITION_INCREASE_PCT = 0.10      # OR 10% position increase
@@ -82,9 +81,6 @@ def apply_filters(transactions):
         market_cap = _get_market_cap(ticker)
         if market_cap is None:
             logger.info(f"[{ticker}] SKIP — could not fetch market cap")
-            continue
-        if market_cap >= MAX_MARKET_CAP:
-            logger.info(f"[{ticker}] SKIP — market cap ${market_cap:,.0f} ≥ $500M")
             continue
 
         # ── Filter 2: Cluster size (2+ insiders within 30 days) ──────────────
