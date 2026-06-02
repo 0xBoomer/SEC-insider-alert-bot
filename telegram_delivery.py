@@ -107,7 +107,7 @@ def send_summary(alert_count, skip_count, error_count, near_misses=None, score_n
             msg += f"\n  • ${ticker} — {cluster} insiders, Z={z:.2f}, ${cap_m:.1f}M cap"
 
     if solo_near_misses:
-        msg += "\n\n👤 <b>Large solo insider buys (no cluster — check manually):</b>"
+        msg += "\n\n👤 <b>Large solo insider buys ≥$250K (no cluster — check manually):</b>"
         for ticker, name, role, value, price, cap_m in sorted(solo_near_misses, key=lambda x: -x[3]):
             msg += f"\n  • ${ticker} — {name} ({role}): ${value:,.0f} @ ${price:.2f} | ${cap_m:.1f}M cap"
 

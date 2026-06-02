@@ -29,7 +29,7 @@ MIN_CLUSTER_SIZE = 2                  # At least 2 unique insiders
 MIN_VALUE_PCT_OF_COMP = 0.05          # 5% of estimated annual comp
 MIN_POSITION_INCREASE_PCT = 0.10      # OR 10% position increase
 LOOKBACK_DAYS = 30                    # Cluster window
-SOLO_BUY_MIN_VALUE = 100_000          # Surface single-insider buys above this amount
+SOLO_BUY_MIN_VALUE = 250_000          # Surface single-insider buys above this amount
 
 # Rough annual comp estimates by title keyword (proxy data without a paid API).
 # These are conservative medians for small-cap companies.
