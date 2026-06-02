@@ -73,12 +73,13 @@ def send_alert(ticker, ticker_data, score_result, survival_metrics):
         return False
 
 
-def send_summary(alert_count, skip_count, error_count, near_misses=None, score_near_misses=None, solo_near_misses=None):
+def send_summary(alert_count, skip_count, error_count, near_misses=None, score_near_misses=None, solo_near_misses=None, notable_cluster_distress=None):
     """
     Send a brief end-of-run summary so you know the bot fired even on quiet days.
     near_misses: list of (ticker, z_score, cluster_size, cap_m) — failed Z (1.50–1.81)
     score_near_misses: list of (ticker, score, cluster_size, cap_m) — passed survival, score < 45
     solo_near_misses: list of (ticker, name, role, value, price, cap_m) — large single-insider buys
+    notable_cluster_distress: list of (ticker, cluster_size, z_score, cap_m) — 5+ insiders, Z < 1.50
     """
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
@@ -99,6 +100,11 @@ def send_summary(alert_count, skip_count, error_count, near_misses=None, score_n
             f"Sent <b>{alert_count}</b> alert(s). "
             f"{skip_count} filtered out, {error_count} data error(s)."
         )
+
+    if notable_cluster_distress:
+        msg += "\n\n⚡ <b>Notable cluster despite distress (5+ insiders, Z &lt; 1.50):</b>"
+        for ticker, cluster, z, cap_m in sorted(notable_cluster_distress, key=lambda x: -x[1]):
+            msg += f"\n  • ${ticker} — {cluster} insiders, Z={z:.2f}, ${cap_m:.1f}M cap"
 
     if solo_near_misses:
         msg += "\n\n👤 <b>Large solo insider buys (no cluster — check manually):</b>"

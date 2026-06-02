@@ -46,8 +46,10 @@ def run():
     alert_count = 0
     skip_count = 0
     error_count = 0
-    near_misses = []        # (ticker, z_score, cluster_size, cap_m) — failed Z-score near-miss
-    score_near_misses = []  # (ticker, score, cluster_size, cap_m) — passed survival, scored < 45
+    near_misses = []              # (ticker, z_score, cluster_size, cap_m) — failed Z (1.50–1.81)
+    score_near_misses = []        # (ticker, score, cluster_size, cap_m) — passed survival, score < 45
+    notable_cluster_distress = [] # (ticker, cluster_size, z_score, cap_m) — 5+ insiders, Z < 1.50
+    NOTABLE_CLUSTER_MIN = 5
 
     # ── Step 1: Load deduplication state ─────────────────────────────────────
     processed = deduplication.load_processed()
@@ -111,10 +113,13 @@ def run():
 
         if not survival["passes"]:
             logger.info(f"[{ticker}] Rejected by survival check: {survival['reject_reason']}")
+            cap_m = ticker_data["market_cap"] / 1e6
             if survival.get("near_miss"):
-                cap_m = ticker_data["market_cap"] / 1e6
                 near_misses.append((ticker, survival["z_score"], ticker_data["cluster_size"], cap_m))
                 logger.info(f"[{ticker}] Near-miss flagged (Z={survival['z_score']})")
+            elif ticker_data["cluster_size"] >= NOTABLE_CLUSTER_MIN:
+                notable_cluster_distress.append((ticker, ticker_data["cluster_size"], survival["z_score"], cap_m))
+                logger.info(f"[{ticker}] Notable cluster despite distress (cluster={ticker_data['cluster_size']}, Z={survival['z_score']})")
             skip_count += 1
             continue
 
@@ -162,7 +167,7 @@ def run():
         f"Run complete — {alert_count} alert(s) sent, "
         f"{skip_count} filtered/below-threshold, {error_count} error(s)"
     )
-    telegram_delivery.send_summary(alert_count, skip_count, error_count, near_misses, score_near_misses, solo_near_misses)
+    telegram_delivery.send_summary(alert_count, skip_count, error_count, near_misses, score_near_misses, solo_near_misses, notable_cluster_distress)
 
 
 if __name__ == "__main__":
