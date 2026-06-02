@@ -86,8 +86,8 @@ def run():
 
     # ── Step 4: Filter layer ──────────────────────────────────────────────────
     logger.info("Applying filters (market cap, cluster, conviction, routine check)…")
-    filtered = filter_layer.apply_filters(new_transactions)
-    skip_count += len(set(t["ticker"] for t in new_transactions)) - len(filtered)
+    filtered, solo_buys = filter_layer.apply_filters(new_transactions)
+    skip_count += len(set(t["ticker"] for t in new_transactions)) - len(filtered) - len(solo_buys)
     logger.info(f"{len(filtered)} ticker(s) passed all four filters")
 
     if not filtered:
@@ -138,6 +138,20 @@ def run():
         else:
             error_count += 1
 
+    # ── Collect solo buy near-misses for summary ──────────────────────────────
+    solo_near_misses = []
+    for ticker, data in solo_buys.items():
+        best = data["transactions"][0]
+        cap_m = data["market_cap"] / 1e6
+        solo_near_misses.append((
+            ticker,
+            best["filer_name"],
+            best["officer_title"] or "Director",
+            best["total_value"],
+            best["price_per_share"],
+            cap_m,
+        ))
+
     # ── Persist updated deduplication state ───────────────────────────────────
     deduplication.save_processed(processed)
     logger.info(f"Saved {len(processed)} accession numbers to processed.json")
@@ -148,7 +162,7 @@ def run():
         f"Run complete — {alert_count} alert(s) sent, "
         f"{skip_count} filtered/below-threshold, {error_count} error(s)"
     )
-    telegram_delivery.send_summary(alert_count, skip_count, error_count, near_misses, score_near_misses)
+    telegram_delivery.send_summary(alert_count, skip_count, error_count, near_misses, score_near_misses, solo_near_misses)
 
 
 if __name__ == "__main__":

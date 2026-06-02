@@ -29,6 +29,7 @@ MIN_CLUSTER_SIZE = 2                  # At least 2 unique insiders
 MIN_VALUE_PCT_OF_COMP = 0.05          # 5% of estimated annual comp
 MIN_POSITION_INCREASE_PCT = 0.10      # OR 10% position increase
 LOOKBACK_DAYS = 30                    # Cluster window
+SOLO_BUY_MIN_VALUE = 100_000          # Surface single-insider buys above this amount
 
 # Rough annual comp estimates by title keyword (proxy data without a paid API).
 # These are conservative medians for small-cap companies.
@@ -73,6 +74,7 @@ def apply_filters(transactions):
         by_ticker[txn["ticker"]].append(txn)
 
     passing = {}
+    solo_buys = {}  # large single-insider buys that fail cluster filter
 
     for ticker, txns in by_ticker.items():
         issuer_cik = txns[0]["issuer_cik"]
@@ -86,10 +88,27 @@ def apply_filters(transactions):
         # ── Filter 2: Cluster size (2+ insiders within 30 days) ──────────────
         cluster_insiders = _get_cluster_insiders(ticker, issuer_cik, txns)
         if len(cluster_insiders) < MIN_CLUSTER_SIZE:
-            logger.info(
-                f"[{ticker}] SKIP — only {len(cluster_insiders)} insider(s) buying "
-                f"in last {LOOKBACK_DAYS} days (need {MIN_CLUSTER_SIZE})"
-            )
+            # Surface large single-insider buys even without a cluster
+            notable = [
+                t for t in txns
+                if t["total_value"] >= SOLO_BUY_MIN_VALUE and _is_significant_purchase(t)
+            ]
+            if notable:
+                solo_buys[ticker] = {
+                    "transactions": sorted(notable, key=lambda t: t["total_value"], reverse=True),
+                    "market_cap": market_cap,
+                    "cluster_size": len(cluster_insiders),
+                    "issuer_name": txns[0]["issuer_name"],
+                }
+                logger.info(
+                    f"[{ticker}] SOLO BUY — ${max(t['total_value'] for t in notable):,.0f} "
+                    f"single insider, flagged for summary"
+                )
+            else:
+                logger.info(
+                    f"[{ticker}] SKIP — only {len(cluster_insiders)} insider(s) buying "
+                    f"in last {LOOKBACK_DAYS} days (need {MIN_CLUSTER_SIZE})"
+                )
             continue
 
         # ── Filter 3: Conviction threshold (value vs comp OR position size) ───
@@ -117,7 +136,7 @@ def apply_filters(transactions):
             "issuer_name": txns[0]["issuer_name"],
         }
 
-    return passing
+    return passing, solo_buys
 
 
 # ── Filter helpers ────────────────────────────────────────────────────────────

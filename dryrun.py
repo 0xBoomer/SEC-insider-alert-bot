@@ -34,9 +34,20 @@ if not transactions:
 # Step 2: Filters
 print("Applying filters…")
 logging.getLogger("filter_layer").setLevel(logging.INFO)
-filtered = filter_layer.apply_filters(transactions)
+filtered, solo_buys = filter_layer.apply_filters(transactions)
 logging.getLogger("filter_layer").setLevel(logging.WARNING)
 print(f"\n{len(filtered)} ticker(s) passed all filters\n")
+
+if solo_buys:
+    print(f"{'─'*60}")
+    print(f"SOLO BUYS — large single-insider purchases ({len(solo_buys)}):")
+    for ticker, data in sorted(solo_buys.items(), key=lambda x: -x[1]["transactions"][0]["total_value"]):
+        best = data["transactions"][0]
+        cap_m = data["market_cap"] / 1e6
+        print(f"  {ticker}: {best['filer_name']} ({best['officer_title'] or 'Director'}): "
+              f"{best['shares_purchased']:,.0f} sh @ ${best['price_per_share']:.2f} "
+              f"= ${best['total_value']:,.0f}  |  Cap ${cap_m:.1f}M")
+    print()
 
 if not filtered:
     print("No tickers passed filters.")
