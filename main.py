@@ -46,7 +46,8 @@ def run():
     alert_count = 0
     skip_count = 0
     error_count = 0
-    near_misses = []  # (ticker, z_score, cluster_size, cap_m)
+    near_misses = []        # (ticker, z_score, cluster_size, cap_m) — failed Z-score near-miss
+    score_near_misses = []  # (ticker, score, cluster_size, cap_m) — passed survival, scored < 45
 
     # ── Step 1: Load deduplication state ─────────────────────────────────────
     processed = deduplication.load_processed()
@@ -125,6 +126,8 @@ def run():
                 f"[{ticker}] Below score threshold "
                 f"({score_result['total']}/80 < {scoring_engine.MIN_SCORE})"
             )
+            cap_m = ticker_data["market_cap"] / 1e6
+            score_near_misses.append((ticker, score_result["total"], ticker_data["cluster_size"], cap_m))
             skip_count += 1
             continue
 
@@ -145,7 +148,7 @@ def run():
         f"Run complete — {alert_count} alert(s) sent, "
         f"{skip_count} filtered/below-threshold, {error_count} error(s)"
     )
-    telegram_delivery.send_summary(alert_count, skip_count, error_count, near_misses)
+    telegram_delivery.send_summary(alert_count, skip_count, error_count, near_misses, score_near_misses)
 
 
 if __name__ == "__main__":

@@ -73,10 +73,11 @@ def send_alert(ticker, ticker_data, score_result, survival_metrics):
         return False
 
 
-def send_summary(alert_count, skip_count, error_count, near_misses=None):
+def send_summary(alert_count, skip_count, error_count, near_misses=None, score_near_misses=None):
     """
     Send a brief end-of-run summary so you know the bot fired even on quiet days.
-    near_misses: list of (ticker, z_score, cluster_size, cap_m) tuples
+    near_misses: list of (ticker, z_score, cluster_size, cap_m) — failed Z (1.50–1.81)
+    score_near_misses: list of (ticker, score, cluster_size, cap_m) — passed survival, score < 45
     """
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
@@ -97,6 +98,11 @@ def send_summary(alert_count, skip_count, error_count, near_misses=None):
             f"Sent <b>{alert_count}</b> alert(s). "
             f"{skip_count} filtered out, {error_count} data error(s)."
         )
+
+    if score_near_misses:
+        msg += "\n\n📉 <b>Below score threshold (passed all checks, score &lt; 45):</b>"
+        for ticker, score, cluster, cap_m in sorted(score_near_misses, key=lambda x: -x[1]):
+            msg += f"\n  • ${ticker} — {score}/80, {cluster} insiders, ${cap_m:.1f}M cap"
 
     if near_misses:
         msg += "\n\n⚠️ <b>Near-misses (Z 1.50–1.81 — check manually):</b>"
