@@ -171,12 +171,22 @@ def _format_message(ticker, ticker_data, score_result, survival_metrics):
         else:
             pos_str = " | new stake"
 
+        if txn.get("is_largest_ever"):
+            prior = txn.get("prior_max_purchase")
+            year = txn.get("prior_max_year")
+            if prior and year:
+                largest_str = f" ⭐ largest ever (prev. ${prior:,.0f} in {year})"
+            else:
+                largest_str = " ⭐ first purchase on record"
+        else:
+            largest_str = ""
+
         lines.append(
             f"  • {txn['filer_name']} ({role}): "
             f"{txn['shares_purchased']:,.0f} sh "
             f"@ ${txn['price_per_share']:.2f} "
             f"= ${txn['total_value']:,.0f} "
-            f"({pct_of_comp:.0f}% of {comp_label}{pos_str})"
+            f"({pct_of_comp:.0f}% of {comp_label}{pos_str}){largest_str}"
         )
 
     # ── Survival metrics ──────────────────────────────────────────────────────

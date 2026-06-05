@@ -136,7 +136,19 @@ def run():
             skip_count += 1
             continue
 
-        # Step 7: Send Telegram alert
+        # Step 7: Enrich transactions with "largest purchase ever" context
+        for txn in ticker_data["transactions"]:
+            is_largest, prior_max, prior_year = edgar_poller.get_largest_prior_purchase(
+                ticker_data["issuer_cik"],
+                txn["filer_name"],
+                txn["total_value"],
+                txn["accession_no"],
+            )
+            txn["is_largest_ever"] = is_largest
+            txn["prior_max_purchase"] = prior_max
+            txn["prior_max_year"] = prior_year
+
+        # Step 8: Send Telegram alert
         success = telegram_delivery.send_alert(ticker, ticker_data, score_result, survival)
         if success:
             alert_count += 1

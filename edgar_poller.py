@@ -393,6 +393,81 @@ def _extract_transactions(root, cik, accession_no):
     return transactions
 
 
+# ── Insider purchase history (used for "largest ever" context) ───────────────
+
+def get_largest_prior_purchase(issuer_cik, filer_name, current_value, current_accession=None):
+    """
+    Check this insider's Form 4 history for the same issuer and return
+    (is_largest_ever, prior_max_value, prior_max_year).
+
+    Uses reporterNames from the submissions JSON to pre-filter without fetching
+    XMLs where possible, then fetches up to 30 historical XMLs to get amounts.
+    Falls back to (False, None, None) on any network error.
+    """
+    MAX_HISTORY_XMLS = 30
+
+    cik_padded = issuer_cik.zfill(10)
+    url = f"https://data.sec.gov/submissions/CIK{cik_padded}.json"
+
+    try:
+        resp = _get(url)
+        data = resp.json()
+    except Exception:
+        return (False, None, None)
+
+    recent = data.get("filings", {}).get("recent", {})
+    forms = recent.get("form", [])
+    accessions = recent.get("accessionNumber", [])
+    filing_dates = recent.get("filingDate", [])
+    reporter_names_list = recent.get("reporterNames", [])
+
+    filer_lower = filer_name.lower()
+
+    candidates = []
+    for i, form in enumerate(forms):
+        if form != "4":
+            continue
+        if i >= len(accessions):
+            continue
+
+        acc = _normalise_accession(accessions[i].replace("-", ""))
+        if acc == current_accession:
+            continue
+
+        # Use reporterNames to skip unrelated filings when the field is present
+        if reporter_names_list and i < len(reporter_names_list):
+            names = reporter_names_list[i]
+            if isinstance(names, list):
+                if not any(filer_lower in n.lower() for n in names):
+                    continue
+            elif isinstance(names, str):
+                if filer_lower not in names.lower():
+                    continue
+
+        date_str = filing_dates[i] if i < len(filing_dates) else ""
+        candidates.append((acc, date_str))
+
+    if not candidates:
+        return (True, None, None)  # No prior filings — first purchase on record
+
+    prior_purchases = []
+    for acc, date_str in candidates[:MAX_HISTORY_XMLS]:
+        try:
+            txns = _parse_form4(issuer_cik, acc)
+            if txns:
+                for t in txns:
+                    if filer_lower in t["filer_name"].lower() and t["total_value"] > 0:
+                        prior_purchases.append((t["total_value"], date_str[:4]))
+        except Exception:
+            continue
+
+    if not prior_purchases:
+        return (True, None, None)
+
+    prior_max_value, prior_max_year = max(prior_purchases, key=lambda x: x[0])
+    return (current_value > prior_max_value, prior_max_value, prior_max_year)
+
+
 # ── 30-day cluster lookback (used by filter_layer) ───────────────────────────
 
 def fetch_recent_form4_accessions(issuer_cik, days=30):
