@@ -185,7 +185,6 @@ def _format_sale_message(ticker, ticker_data):
             f"{txn['shares_sold']:,.0f} sh @ ${txn['price_per_share']:.2f} "
             f"= {_fmt_money(txn['total_value'])}  |  -{pos_pct:.0f}% of position"
         )
-        lines.append(f"    Remaining: {txn['shares_after']:,.0f} sh")
 
     return "\n".join(lines)
 
