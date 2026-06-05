@@ -128,7 +128,7 @@ def fetch_form4_filings(days_back=1, start_date=None, end_date=None):
 
     if not filing_rows:
         logger.info("No Form 4 filings found in date range")
-        return []
+        return [], []
 
     # Group by issuer CIK and prioritize cluster candidates (2+ filings from
     # the same issuer today) so they are always processed even if the run is
