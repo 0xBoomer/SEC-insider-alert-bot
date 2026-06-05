@@ -30,7 +30,6 @@ import os
 import time
 
 import requests
-import yfinance as yf
 
 logger = logging.getLogger(__name__)
 
@@ -156,40 +155,27 @@ def send_sale_alert(ticker, ticker_data):
         return False
 
 
+def _fmt_money(value):
+    """Format a dollar value compactly: $21.8M, $268.8K, etc."""
+    if value >= 1_000_000:
+        return f"${value/1_000_000:.1f}M"
+    if value >= 1_000:
+        return f"${value/1_000:.1f}K"
+    return f"${value:.0f}"
+
+
 def _format_sale_message(ticker, ticker_data):
     market_cap_m = ticker_data["market_cap"] / 1_000_000
     transactions = ticker_data["transactions"]
     issuer_name = ticker_data.get("issuer_name", ticker)
     cluster_size = ticker_data["cluster_size"]
 
-    # Price momentum context
-    momentum_str = ""
-    try:
-        hist = yf.Ticker(ticker).history(period="6mo")
-        if len(hist) >= 2:
-            current = float(hist["Close"].iloc[-1])
-            mo1 = float(hist["Close"].iloc[-21]) if len(hist) >= 21 else None
-            mo3 = float(hist["Close"].iloc[-63]) if len(hist) >= 63 else None
-            mo6 = float(hist["Close"].iloc[0])
-            parts = []
-            if mo3:
-                chg3 = (current - mo3) / mo3 * 100
-                parts.append(f"{chg3:+.0f}% (3mo)")
-            chg6 = (current - mo6) / mo6 * 100
-            parts.append(f"{chg6:+.0f}% (6mo)")
-            if parts:
-                label = "Rip Sell" if (mo3 and chg3 > 20) or chg6 > 30 else "context"
-                momentum_str = f"📈 Stock {label}: {', '.join(parts)}"
-    except Exception:
-        pass
-
     lines = []
-    lines.append("─" * 36)
     label = "SALE CLUSTER" if cluster_size >= 2 else "LARGE SOLO SALE"
     lines.append(f"🔴 <b>INSIDER {label} — ${ticker}</b>")
     lines.append(f"<i>{issuer_name}</i>")
-    lines.append(f"Cap: ${market_cap_m:.1f}M  |  {cluster_size} insider(s) selling")
-    lines.append("─" * 36)
+    lines.append(f"Cap: {_fmt_money(ticker_data['market_cap'])}  |  {cluster_size} insider(s) selling")
+    lines.append("")
 
     for txn in transactions:
         role = txn["officer_title"] or ("Director" if txn["is_director"] else "Insider")
@@ -197,15 +183,10 @@ def _format_sale_message(ticker, ticker_data):
         lines.append(
             f"  • {txn['filer_name']} ({role}): "
             f"{txn['shares_sold']:,.0f} sh @ ${txn['price_per_share']:.2f} "
-            f"= ${txn['total_value']:,.0f}  |  -{pos_pct:.0f}% of position"
+            f"= {_fmt_money(txn['total_value'])}  |  -{pos_pct:.0f}% of position"
         )
         lines.append(f"    Remaining: {txn['shares_after']:,.0f} sh")
 
-    if momentum_str:
-        lines.append("")
-        lines.append(momentum_str)
-
-    lines.append("─" * 36)
     return "\n".join(lines)
 
 

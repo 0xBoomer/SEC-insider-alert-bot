@@ -157,7 +157,11 @@ def fetch_form4_filings(days_back=1, start_date=None, end_date=None):
 
     purchases = []
     sales = []
+    seen_accessions = set()  # same accession can appear under both issuer and reporter CIK
     for i, row in enumerate(ordered_rows):
+        if row["accession_no"] in seen_accessions:
+            continue
+        seen_accessions.add(row["accession_no"])
         if i > 0 and i % 500 == 0:
             print(
                 f"  [{i}/{len(ordered_rows)}] parsed… "
