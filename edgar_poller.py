@@ -36,8 +36,6 @@ HEADERS = {"User-Agent": "InsiderAlertBot contact@example.com"}
 # 0.12 s keeps us well under the 10 req/s ceiling
 REQUEST_DELAY = 0.12
 
-# Max Form 4 filings to parse per run (bounds GitHub Actions runtime)
-MAX_FILINGS = 2000
 
 
 # ── HTTP helpers ─────────────────────────────────────────────────────────────
@@ -132,16 +130,36 @@ def fetch_form4_filings(days_back=1, start_date=None, end_date=None):
         logger.info("No Form 4 filings found in date range")
         return []
 
-    logger.info(f"Parsing {min(len(filing_rows), MAX_FILINGS)} Form 4 filings…")
+    # Group by issuer CIK and prioritize cluster candidates (2+ filings from
+    # the same issuer today) so they are always processed even if the run is
+    # interrupted. Solo-filer issuers follow.
+    from collections import defaultdict
+    by_cik = defaultdict(list)
+    for row in filing_rows:
+        by_cik[row["cik"]].append(row)
+
+    cluster_rows = []
+    solo_rows = []
+    for rows in by_cik.values():
+        if len(rows) >= 2:
+            cluster_rows.extend(rows)
+        else:
+            solo_rows.extend(rows)
+
+    ordered_rows = cluster_rows + solo_rows
+    n_cluster_issuers = sum(1 for rows in by_cik.values() if len(rows) >= 2)
+
+    logger.info(
+        f"Parsing {len(ordered_rows)} Form 4 filings "
+        f"({len(cluster_rows)} from {n_cluster_issuers} cluster issuers first, "
+        f"then {len(solo_rows)} solo)…"
+    )
 
     transactions = []
-    total = min(len(filing_rows), MAX_FILINGS)
-    for i, row in enumerate(filing_rows[:MAX_FILINGS]):
-        if i > 0 and i % 1000 == 0:
-            print(f"  [{i}/{total}] parsed… {len(transactions)} open-market purchases so far", flush=True)
-        cik = row["cik"]
-        accession_no = row["accession_no"]
-        filing_transactions = _parse_form4(cik, accession_no)
+    for i, row in enumerate(ordered_rows):
+        if i > 0 and i % 500 == 0:
+            print(f"  [{i}/{len(ordered_rows)}] parsed… {len(transactions)} open-market purchases so far", flush=True)
+        filing_transactions = _parse_form4(row["cik"], row["accession_no"])
         if filing_transactions:
             transactions.extend(filing_transactions)
 
