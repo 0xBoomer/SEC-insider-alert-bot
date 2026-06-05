@@ -30,6 +30,7 @@ MIN_VALUE_PCT_OF_COMP = 0.05          # 5% of estimated annual comp
 MIN_POSITION_INCREASE_PCT = 0.10      # OR 10% position increase
 LOOKBACK_DAYS = 30                    # Cluster window
 SOLO_BUY_MIN_VALUE = 250_000          # Surface single-insider buys above this amount
+SOLO_SALE_MIN_VALUE = 1_000_000       # Surface single-insider sales above this amount
 
 # Rough annual comp estimates by title keyword (proxy data without a paid API).
 # These are conservative medians for small-cap companies.
@@ -297,4 +298,70 @@ def _is_routine_purchase(txn, issuer_cik):
                 # don't reject on ambiguous evidence
                 pass
 
+    return False
+
+
+# ── Sale filters ──────────────────────────────────────────────────────────────
+
+def apply_sale_filters(sales):
+    """
+    Filter insider sales to notable ones: clusters (2+ unique insiders selling
+    the same ticker today) or large solo sales (>= $1M).
+
+    Returns {ticker: {"transactions": [...], "market_cap": int, "cluster_size": int,
+                       "issuer_name": str}}
+    """
+    by_ticker = defaultdict(list)
+    for txn in sales:
+        by_ticker[txn["ticker"]].append(txn)
+
+    passing = {}
+
+    for ticker, txns in by_ticker.items():
+        market_cap = _get_market_cap(ticker)
+        if market_cap is None:
+            continue
+
+        significant = [t for t in txns if _is_significant_sale(t)]
+        if not significant:
+            continue
+
+        unique_sellers = {t["filer_name"] for t in significant}
+
+        if len(unique_sellers) >= MIN_CLUSTER_SIZE:
+            logger.info(
+                f"[{ticker}] SALE CLUSTER — cap ${market_cap/1e6:.1f}M, "
+                f"{len(unique_sellers)} seller(s)"
+            )
+            passing[ticker] = {
+                "transactions": sorted(significant, key=lambda t: t["total_value"], reverse=True),
+                "market_cap": market_cap,
+                "cluster_size": len(unique_sellers),
+                "issuer_name": txns[0]["issuer_name"],
+            }
+        else:
+            large_solo = [t for t in significant if t["total_value"] >= SOLO_SALE_MIN_VALUE]
+            if large_solo:
+                best = max(large_solo, key=lambda t: t["total_value"])
+                logger.info(
+                    f"[{ticker}] SOLO SALE — ${best['total_value']:,.0f} single insider"
+                )
+                passing[ticker] = {
+                    "transactions": sorted(large_solo, key=lambda t: t["total_value"], reverse=True),
+                    "market_cap": market_cap,
+                    "cluster_size": 1,
+                    "issuer_name": txns[0]["issuer_name"],
+                }
+
+    return passing
+
+
+def _is_significant_sale(txn):
+    """Sale value > 5% of comp OR sold > 10% of position."""
+    comp = get_comp(txn["issuer_cik"], txn["filer_name"], txn["officer_title"])
+    if txn["total_value"] / comp >= MIN_VALUE_PCT_OF_COMP:
+        return True
+    if txn["shares_before"] > 0:
+        if txn["shares_sold"] / txn["shares_before"] >= MIN_POSITION_INCREASE_PCT:
+            return True
     return False

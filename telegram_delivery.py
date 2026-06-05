@@ -30,6 +30,7 @@ import os
 import time
 
 import requests
+import yfinance as yf
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +127,86 @@ def send_summary(alert_count, skip_count, error_count, near_misses=None, score_n
         requests.post(url, json={"chat_id": chat_id, "text": msg, "parse_mode": "HTML"}, timeout=20)
     except Exception as e:
         logger.warning(f"Could not send summary: {e}")
+
+
+def send_sale_alert(ticker, ticker_data):
+    """Send a Telegram alert for a notable insider sale cluster or large solo sale."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        return False
+
+    message = _format_sale_message(ticker, ticker_data)
+    url = TELEGRAM_API.format(token=token)
+    try:
+        resp = requests.post(
+            url,
+            json={"chat_id": chat_id, "text": message, "parse_mode": "HTML",
+                  "disable_web_page_preview": True},
+            timeout=20,
+        )
+        resp.raise_for_status()
+        if resp.json().get("ok"):
+            logger.info(f"[{ticker}] Sale alert sent")
+            return True
+        logger.error(f"[{ticker}] Telegram API error: {resp.json()}")
+        return False
+    except requests.RequestException as e:
+        logger.error(f"[{ticker}] Failed to send sale alert: {e}")
+        return False
+
+
+def _format_sale_message(ticker, ticker_data):
+    market_cap_m = ticker_data["market_cap"] / 1_000_000
+    transactions = ticker_data["transactions"]
+    issuer_name = ticker_data.get("issuer_name", ticker)
+    cluster_size = ticker_data["cluster_size"]
+
+    # Price momentum context
+    momentum_str = ""
+    try:
+        hist = yf.Ticker(ticker).history(period="6mo")
+        if len(hist) >= 2:
+            current = float(hist["Close"].iloc[-1])
+            mo1 = float(hist["Close"].iloc[-21]) if len(hist) >= 21 else None
+            mo3 = float(hist["Close"].iloc[-63]) if len(hist) >= 63 else None
+            mo6 = float(hist["Close"].iloc[0])
+            parts = []
+            if mo3:
+                chg3 = (current - mo3) / mo3 * 100
+                parts.append(f"{chg3:+.0f}% (3mo)")
+            chg6 = (current - mo6) / mo6 * 100
+            parts.append(f"{chg6:+.0f}% (6mo)")
+            if parts:
+                label = "Rip Sell" if (mo3 and chg3 > 20) or chg6 > 30 else "context"
+                momentum_str = f"📈 Stock {label}: {', '.join(parts)}"
+    except Exception:
+        pass
+
+    lines = []
+    lines.append("─" * 36)
+    label = "SALE CLUSTER" if cluster_size >= 2 else "LARGE SOLO SALE"
+    lines.append(f"🔴 <b>INSIDER {label} — ${ticker}</b>")
+    lines.append(f"<i>{issuer_name}</i>")
+    lines.append(f"Cap: ${market_cap_m:.1f}M  |  {cluster_size} insider(s) selling")
+    lines.append("─" * 36)
+
+    for txn in transactions:
+        role = txn["officer_title"] or ("Director" if txn["is_director"] else "Insider")
+        pos_pct = txn["shares_sold"] / txn["shares_before"] * 100 if txn["shares_before"] > 0 else 100
+        lines.append(
+            f"  • {txn['filer_name']} ({role}): "
+            f"{txn['shares_sold']:,.0f} sh @ ${txn['price_per_share']:.2f} "
+            f"= ${txn['total_value']:,.0f}  |  -{pos_pct:.0f}% of position"
+        )
+        lines.append(f"    Remaining: {txn['shares_after']:,.0f} sh")
+
+    if momentum_str:
+        lines.append("")
+        lines.append(momentum_str)
+
+    lines.append("─" * 36)
+    return "\n".join(lines)
 
 
 # ── Message formatting ────────────────────────────────────────────────────────

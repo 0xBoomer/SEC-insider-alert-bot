@@ -155,16 +155,21 @@ def fetch_form4_filings(days_back=1, start_date=None, end_date=None):
         f"then {len(solo_rows)} solo)…"
     )
 
-    transactions = []
+    purchases = []
+    sales = []
     for i, row in enumerate(ordered_rows):
         if i > 0 and i % 500 == 0:
-            print(f"  [{i}/{len(ordered_rows)}] parsed… {len(transactions)} open-market purchases so far", flush=True)
-        filing_transactions = _parse_form4(row["cik"], row["accession_no"])
-        if filing_transactions:
-            transactions.extend(filing_transactions)
+            print(
+                f"  [{i}/{len(ordered_rows)}] parsed… "
+                f"{len(purchases)} purchases, {len(sales)} sales so far",
+                flush=True,
+            )
+        p, s = _parse_form4_all(row["cik"], row["accession_no"])
+        purchases.extend(p)
+        sales.extend(s)
 
-    logger.info(f"Extracted {len(transactions)} open-market purchase transactions")
-    return transactions
+    logger.info(f"Extracted {len(purchases)} purchases and {len(sales)} open-market sales")
+    return purchases, sales
 
 
 def _fetch_index_rows(year, qtr, start_date, end_date):
@@ -242,39 +247,52 @@ def _normalise_accession(adsh):
 
 # ── XML parsing helpers ──────────────────────────────────────────────────────
 
-def _parse_form4(cik, accession_no):
-    """
-    Fetch the Form 4 XML for a given CIK + accession number and return
-    a list of open-market purchase transaction dicts.
-    Returns [] if found but no qualifying transactions; None if not found.
-    """
+def _fetch_xml(cik, accession_no):
+    """Fetch and parse a Form 4 XML. Returns the root element, or None on failure."""
     acc_nodashes = accession_no.replace("-", "")
-
-    # Get the directory listing to find the XML filename
     dir_url = f"{EDGAR_BASE}/Archives/edgar/data/{cik}/{acc_nodashes}/"
-
     try:
         resp = _get(dir_url)
-        # Parse XML filenames from the HTML directory listing
         xml_filename = _find_xml_in_directory(resp.text, acc_nodashes)
     except Exception as e:
         logger.debug(f"Could not fetch directory for {accession_no} CIK {cik}: {e}")
         return None
-
     if not xml_filename:
         logger.debug(f"No XML found in {accession_no}")
-        return []
-
+        return None
     xml_url = f"{EDGAR_BASE}/Archives/edgar/data/{cik}/{acc_nodashes}/{xml_filename}"
-
     try:
         resp = _get(xml_url)
-        root = ET.fromstring(resp.content)
+        return ET.fromstring(resp.content)
     except Exception as e:
         logger.debug(f"Could not parse XML for {accession_no}: {e}")
-        return []
+        return None
 
+
+def _parse_form4(cik, accession_no):
+    """
+    Fetch the Form 4 XML and return open-market purchase transaction dicts.
+    Returns [] if found but no qualifying transactions; None if not found.
+    Used by filter_layer (cluster lookback) and edgar_poller (history lookup).
+    """
+    root = _fetch_xml(cik, accession_no)
+    if root is None:
+        return None
     return _extract_transactions(root, cik, accession_no)
+
+
+def _parse_form4_all(cik, accession_no):
+    """
+    Fetch the Form 4 XML once and return (purchases, sales).
+    Used by fetch_form4_filings to extract both in a single HTTP round-trip.
+    """
+    root = _fetch_xml(cik, accession_no)
+    if root is None:
+        return [], []
+    return (
+        _extract_transactions(root, cik, accession_no) or [],
+        _extract_sales(root, cik, accession_no) or [],
+    )
 
 
 def _find_xml_in_directory(html, acc_nodashes):
@@ -391,6 +409,80 @@ def _extract_transactions(root, cik, accession_no):
             continue
 
     return transactions
+
+
+def _extract_sales(root, cik, accession_no):
+    """
+    Walk every nonDerivativeTransaction in the Form 4 XML.
+    Return one dict per open-market sale (transactionCode = "S", disposed = "D").
+    """
+    ticker = (_get_val(root, "issuer/issuerTradingSymbol") or "").upper().strip()
+    issuer_name = _get_val(root, "issuer/issuerName") or ""
+    issuer_cik = (_get_val(root, "issuer/issuerCik") or cik).lstrip("0")
+
+    if not ticker:
+        return []
+
+    filer_name = _get_val(root, "reportingOwner/reportingOwnerId/rptOwnerName") or "Unknown"
+
+    rel = root.find("reportingOwner/reportingOwnerRelationship")
+    is_director = rel is not None and _get_val(rel, "isDirector") == "1"
+    is_officer = rel is not None and _get_val(rel, "isOfficer") == "1"
+    officer_title = (rel is not None and _get_val(rel, "officerTitle") or "")
+
+    if not is_director and not is_officer:
+        return []
+
+    sales = []
+
+    for txn in root.findall("nonDerivativeTable/nonDerivativeTransaction"):
+        code = _get_val(txn, "transactionCoding/transactionCode")
+        if code != "S":
+            continue
+
+        acq_disp = _get_val(txn, "transactionAmounts/transactionAcquiredDisposedCode")
+        if acq_disp != "D":
+            continue
+
+        try:
+            shares_raw = _get_val(txn, "transactionAmounts/transactionShares")
+            price_raw = _get_val(txn, "transactionAmounts/transactionPricePerShare")
+            shares_after_raw = _get_val(txn, "postTransactionAmounts/sharesOwnedFollowingTransaction")
+            txn_date = _get_val(txn, "transactionDate") or date.today().isoformat()
+
+            shares = float(shares_raw) if shares_raw else 0.0
+            price = float(price_raw) if price_raw else 0.0
+            shares_after = float(shares_after_raw) if shares_after_raw else 0.0
+
+            if shares <= 0 or price <= 0:
+                continue
+
+            total_value = shares * price
+            shares_before = shares_after + shares  # sold from a larger position
+
+            sales.append({
+                "ticker": ticker,
+                "issuer_name": issuer_name,
+                "issuer_cik": issuer_cik,
+                "filer_name": filer_name,
+                "officer_title": officer_title,
+                "is_director": is_director,
+                "is_officer": is_officer,
+                "shares_sold": shares,
+                "price_per_share": price,
+                "total_value": total_value,
+                "shares_before": shares_before,
+                "shares_after": shares_after,
+                "transaction_date": txn_date,
+                "filing_date": date.today().isoformat(),
+                "accession_no": accession_no,
+            })
+
+        except (ValueError, TypeError) as e:
+            logger.debug(f"Skipping malformed sale in {accession_no}: {e}")
+            continue
+
+    return sales
 
 
 # ── Insider purchase history (used for "largest ever" context) ───────────────

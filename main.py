@@ -57,8 +57,8 @@ def run():
 
     # ── Step 2: Pull Form 4 filings from last 24h ─────────────────────────────
     logger.info("Polling EDGAR for Form 4 filings (last 24h)…")
-    transactions = edgar_poller.fetch_form4_filings(days_back=1)
-    logger.info(f"Found {len(transactions)} raw open-market purchase transaction(s)")
+    transactions, sale_transactions = edgar_poller.fetch_form4_filings(days_back=1)
+    logger.info(f"Found {len(transactions)} purchase(s) and {len(sale_transactions)} sale(s)")
 
     if not transactions:
         logger.info("No transactions found — exiting")
@@ -172,6 +172,17 @@ def run():
     # ── Persist updated deduplication state ───────────────────────────────────
     deduplication.save_processed(processed)
     logger.info(f"Saved {len(processed)} accession numbers to processed.json")
+
+    # ── Sales pipeline ────────────────────────────────────────────────────────
+    new_sales = [
+        t for t in sale_transactions
+        if not deduplication.is_processed(t["accession_no"], processed)
+    ]
+    if new_sales:
+        logger.info(f"Applying sale filters to {len(new_sales)} new sale transaction(s)…")
+        filtered_sales = filter_layer.apply_sale_filters(new_sales)
+        for ticker, ticker_data in filtered_sales.items():
+            telegram_delivery.send_sale_alert(ticker, ticker_data)
 
     # ── End-of-run summary ────────────────────────────────────────────────────
     logger.info("=" * 60)

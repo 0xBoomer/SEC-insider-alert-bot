@@ -24,8 +24,8 @@ print(f"{'='*60}\n")
 
 # Step 1: Pull filings
 print(f"Polling EDGAR for last {DAYS_BACK} days…")
-transactions = edgar_poller.fetch_form4_filings(days_back=DAYS_BACK)
-print(f"Found {len(transactions)} open-market purchase transactions\n")
+transactions, sale_transactions = edgar_poller.fetch_form4_filings(days_back=DAYS_BACK)
+print(f"Found {len(transactions)} purchases and {len(sale_transactions)} sales\n")
 
 if not transactions:
     print("No transactions found.")
