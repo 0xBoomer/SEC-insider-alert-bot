@@ -411,6 +411,30 @@ def _extract_transactions(root, cik, accession_no):
     return transactions
 
 
+def _is_plan_trade(txn_element, root):
+    """
+    Return True if this transaction was executed pursuant to a Rule 10b5-1 plan.
+    Post-2022 Form 4s have an explicit planAdoptionDate element; older filings
+    reference the plan only in footnotes.
+    """
+    if _get_val(txn_element, "planAdoptionDate"):
+        return True
+
+    footnote_ids = set()
+    for elem in txn_element.iter():
+        for fn in elem.findall("footnoteId"):
+            fn_id = fn.get("id") or fn.get("ID")
+            if fn_id:
+                footnote_ids.add(fn_id)
+
+    for fn_id in footnote_ids:
+        for footnote in root.findall(f".//footnote[@id='{fn_id}']"):
+            if footnote.text and "10b5" in footnote.text.lower():
+                return True
+
+    return False
+
+
 def _extract_sales(root, cik, accession_no):
     """
     Walk every nonDerivativeTransaction in the Form 4 XML.
@@ -443,6 +467,9 @@ def _extract_sales(root, cik, accession_no):
         acq_disp = _get_val(txn, "transactionAmounts/transactionAcquiredDisposedCode")
         if acq_disp != "D":
             continue
+
+        if _is_plan_trade(txn, root):
+            continue  # Skip 10b5-1 plan sales — pre-scheduled, not informative
 
         try:
             shares_raw = _get_val(txn, "transactionAmounts/transactionShares")
