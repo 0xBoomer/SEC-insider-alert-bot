@@ -59,7 +59,7 @@ def run():
     # Use days_back=3 on Mondays to bridge the weekend gap (EDGAR has no
     # Saturday/Sunday filings, so a 1-day lookback on Monday finds nothing).
     from datetime import date as _date
-    days_back = 4 if _date.today().weekday() == 0 else 1
+    days_back = 4  # temporary catch-up: covers Fri June 6 through today
     logger.info(f"Polling EDGAR for Form 4 filings (last {days_back} day(s))…")
     transactions, sale_transactions = edgar_poller.fetch_form4_filings(days_back=days_back)
     logger.info(f"Found {len(transactions)} purchase(s) and {len(sale_transactions)} sale(s)")
