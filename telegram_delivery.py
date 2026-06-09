@@ -191,127 +191,65 @@ def _format_sale_message(ticker, ticker_data):
 
 # ── Message formatting ────────────────────────────────────────────────────────
 
+def _fmt_shares(n):
+    if n >= 1_000_000:
+        return f"{n/1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n/1_000:.0f}K"
+    return f"{n:.0f}"
+
+
 def _format_message(ticker, ticker_data, score_result, survival_metrics):
-    market_cap_m = ticker_data["market_cap"] / 1_000_000
-    transactions = ticker_data["transactions"]
     issuer_name = ticker_data.get("issuer_name", ticker)
     total_score = score_result["total"]
     cluster_size = ticker_data["cluster_size"]
 
     lines = []
 
-    # ── Header ────────────────────────────────────────────────────────────────
-    lines.append("─" * 36)
-    lines.append(f"🚨 <b>INSIDER ALERT — ${ticker}</b>")
-    lines.append(f"<i>{issuer_name}</i>")
+    # Header
+    lines.append(f"🚨 <b>${ticker} — {issuer_name}</b>")
     lines.append(
-        f"Score: <b>{total_score}/80</b>  |  Cap: ${market_cap_m:.1f}M"
+        f"Score {total_score}/80  |  {_fmt_money(ticker_data['market_cap'])} cap  |  {cluster_size} insider{'s' if cluster_size != 1 else ''}"
     )
+    lines.append("")
 
-    # Score breakdown
-    bonus_str = " (+5 cluster bonus)" if score_result["cluster_bonus"] else ""
-    lines.append(
-        f"  PQ={score_result['purchase_quality']} "
-        f"CS={score_result['cluster_strength']}{bonus_str} "
-        f"PC={score_result['price_context']} "
-        f"EP={score_result['earnings_proximity']}"
-    )
-    lines.append("─" * 36)
-
-    # ── Cluster summary ───────────────────────────────────────────────────────
-    lines.append(f"📦 <b>Cluster: {cluster_size} insider(s) buying</b>")
-    issuer_cik = ticker_data.get("issuer_cik", "")
-    for txn in sorted(transactions, key=lambda t: t["total_value"], reverse=True):
+    # Transactions
+    for txn in sorted(ticker_data["transactions"], key=lambda t: t["total_value"], reverse=True):
         role = txn["officer_title"] or ("Director" if txn["is_director"] else "Insider")
-        comp, comp_label = _get_comp_with_label(issuer_cik, txn["filer_name"], txn["officer_title"])
-        pct_of_comp = txn["total_value"] / comp * 100
-
-        if txn["shares_before"] > 0:
-            pos_increase = txn["shares_purchased"] / txn["shares_before"] * 100
-            pos_str = f" | +{pos_increase:.0f}% pos"
-        else:
-            pos_str = " | new stake"
 
         if txn.get("is_largest_ever"):
             prior = txn.get("prior_max_purchase")
             year = txn.get("prior_max_year")
-            if prior and year:
-                largest_str = f" ⭐ largest ever (prev. ${prior:,.0f} in {year})"
-            else:
-                largest_str = " ⭐ first purchase on record"
+            flag = f" ⭐ largest ever (prev. {_fmt_money(prior)} in {year})" if prior and year else " ⭐ first purchase"
         else:
-            largest_str = ""
+            flag = ""
 
         lines.append(
-            f"  • {txn['filer_name']} ({role}): "
-            f"{txn['shares_purchased']:,.0f} sh "
-            f"@ ${txn['price_per_share']:.2f} "
-            f"= ${txn['total_value']:,.0f} "
-            f"({pct_of_comp:.0f}% of {comp_label}{pos_str}){largest_str}"
+            f"• {txn['filer_name']} ({role}): "
+            f"{_fmt_shares(txn['shares_purchased'])} sh @ ${txn['price_per_share']:.2f} = {_fmt_money(txn['total_value'])}"
+            f"{flag}"
         )
 
-    # ── Survival metrics ──────────────────────────────────────────────────────
+    # Survival + price
     lines.append("")
     z = survival_metrics["z_score"]
     cr = survival_metrics["current_ratio"]
-    debt_flag = "⚠️ Debt flag" if survival_metrics["debt_maturity_flag"] else "✅ Debt OK"
-
-    # Z-score zone label
-    if z >= 2.99:
-        z_label = "safe"
-    elif z >= 1.81:
-        z_label = "grey"
-    else:
-        z_label = "distress"  # Shouldn't reach here — survival check would have filtered
-
-    lines.append(
-        f"📊 <b>Survival:</b> Z={z:.2f} ({z_label}) | "
-        f"CR={cr:.2f} | {debt_flag}"
-    )
-
-    # ── Price context ─────────────────────────────────────────────────────────
-    lines.append("")
     cp = score_result.get("current_price")
     low52 = score_result.get("price_52w_low")
     high52 = score_result.get("price_52w_high")
-    swing_low = score_result.get("swing_low")
+
+    survival_str = f"Z={z:.2f} | CR={cr:.2f}"
+    if survival_metrics.get("debt_maturity_flag"):
+        survival_str += " | ⚠️ debt"
 
     if cp and low52 and high52:
         rng = high52 - low52
         pos_pct = (cp - low52) / rng * 100 if rng > 0 else 50
-        lines.append(
-            f"📈 <b>Price:</b> ${cp:.2f}  |  "
-            f"52W Low ${low52:.2f}  |  52W High ${high52:.2f}"
-        )
-        lines.append(
-            f"   → In bottom {pos_pct:.0f}% of 52-week range"
-            if pos_pct <= 50
-            else f"   → In top {100 - pos_pct:.0f}% of 52-week range"
-        )
+        range_str = f"bottom {pos_pct:.0f}% of 52W" if pos_pct <= 50 else f"top {100-pos_pct:.0f}% of 52W"
+        lines.append(f"{survival_str} | ${cp:.2f} ({range_str})")
+    else:
+        lines.append(survival_str)
 
-    # ── Entry note ────────────────────────────────────────────────────────────
-    if swing_low:
-        lines.append("")
-        lines.append(f"📍 <b>Suggested entry:</b> near 20-day swing low of ${swing_low:.2f}")
-        if cp and cp <= swing_low * 1.03:
-            lines.append("   (price is at/near swing low — entry zone active)")
-        elif cp and cp > swing_low * 1.10:
-            lines.append(f"   (price is {((cp/swing_low)-1)*100:.0f}% above swing low — wait for pullback)")
-
-    lines.append("─" * 36)
     return "\n".join(lines)
 
 
-def _get_comp_with_label(issuer_cik, filer_name, title):
-    """
-    Return (comp_value, label_string) for message formatting.
-    Label distinguishes real DEF 14A data from estimates.
-    """
-    from comp_lookup import get_executive_comp
-    from filter_layer import estimate_annual_comp
-
-    real = get_executive_comp(issuer_cik, filer_name)
-    if real:
-        return real, f"${real:,.0f} comp (proxy)"
-    est = estimate_annual_comp(title)
-    return est, f"~${est:,.0f} comp (est)"
