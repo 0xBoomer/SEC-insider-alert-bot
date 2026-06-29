@@ -2,7 +2,7 @@ name: SEC Insider Alert Bot
 
 on:
   schedule:
-    - cron: "30 13 * * 1-5"  # 8:30 AM ET (EDT, Mar–Nov) / adjust to 30 14 for EST
+    - cron: "15 13 * * 1-5"  # 8:15 AM CT (CDT, Mar–Nov) / change to 15 14 for CST (Nov–Mar)
 
   # Allow manual trigger from the GitHub Actions UI for testing
   workflow_dispatch:
