@@ -46,6 +46,7 @@ def run():
     alert_count = 0
     skip_count = 0
     error_count = 0
+    alerted_tickers = []
     near_misses = []              # (ticker, z_score, cluster_size, cap_m) — failed Z (1.50–1.81)
     score_near_misses = []        # (ticker, score, cluster_size, cap_m) — passed survival, score < 45
     notable_cluster_distress = [] # (ticker, cluster_size, z_score, cap_m) — 5+ insiders, Z < 1.50
@@ -61,8 +62,8 @@ def run():
     from datetime import date as _date
     days_back = 3 if _date.today().weekday() == 0 else 1
     logger.info(f"Polling EDGAR for Form 4 filings (last {days_back} day(s))…")
-    transactions, sale_transactions = edgar_poller.fetch_form4_filings(days_back=days_back)
-    logger.info(f"Found {len(transactions)} purchase(s) and {len(sale_transactions)} sale(s)")
+    transactions, _ = edgar_poller.fetch_form4_filings(days_back=days_back)
+    logger.info(f"Found {len(transactions)} purchase(s)")
 
     if not transactions:
         logger.info("No transactions found — exiting")
@@ -156,6 +157,7 @@ def run():
         success = telegram_delivery.send_alert(ticker, ticker_data, score_result, survival)
         if success:
             alert_count += 1
+            alerted_tickers.append(ticker)
         else:
             error_count += 1
 
@@ -177,24 +179,13 @@ def run():
     deduplication.save_processed(processed)
     logger.info(f"Saved {len(processed)} accession numbers to processed.json")
 
-    # ── Sales pipeline ────────────────────────────────────────────────────────
-    new_sales = [
-        t for t in sale_transactions
-        if not deduplication.is_processed(t["accession_no"], processed)
-    ]
-    if new_sales:
-        logger.info(f"Applying sale filters to {len(new_sales)} new sale transaction(s)…")
-        filtered_sales = filter_layer.apply_sale_filters(new_sales)
-        for ticker, ticker_data in filtered_sales.items():
-            telegram_delivery.send_sale_alert(ticker, ticker_data)
-
     # ── End-of-run summary ────────────────────────────────────────────────────
     logger.info("=" * 60)
     logger.info(
         f"Run complete — {alert_count} alert(s) sent, "
         f"{skip_count} filtered/below-threshold, {error_count} error(s)"
     )
-    telegram_delivery.send_summary(alert_count, skip_count, error_count, near_misses, score_near_misses, solo_near_misses, notable_cluster_distress)
+    telegram_delivery.send_summary(alert_count, skip_count, error_count, near_misses, score_near_misses, solo_near_misses, notable_cluster_distress, None, alerted_tickers)
 
 
 if __name__ == "__main__":

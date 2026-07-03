@@ -73,13 +73,14 @@ def send_alert(ticker, ticker_data, score_result, survival_metrics):
         return False
 
 
-def send_summary(alert_count, skip_count, error_count, near_misses=None, score_near_misses=None, solo_near_misses=None, notable_cluster_distress=None):
+def send_summary(alert_count, skip_count, error_count, near_misses=None, score_near_misses=None, solo_near_misses=None, notable_cluster_distress=None, sale_alerts=None, alerted_tickers=None):
     """
     Send a brief end-of-run summary so you know the bot fired even on quiet days.
     near_misses: list of (ticker, z_score, cluster_size, cap_m) — failed Z (1.50–1.81)
     score_near_misses: list of (ticker, score, cluster_size, cap_m) — passed survival, score < 45
     solo_near_misses: list of (ticker, name, role, value, price, cap_m) — large single-insider buys
     notable_cluster_distress: list of (ticker, cluster_size, z_score, cap_m) — 5+ insiders, Z < 1.50
+    sale_alerts: dict {ticker: ticker_data} — notable insider sales
     """
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
@@ -95,31 +96,48 @@ def send_summary(alert_count, skip_count, error_count, near_misses=None, score_n
             f"{skip_count} filtered/skipped, {error_count} data error(s)."
         )
     else:
+        tickers_str = "  " + "  ".join(f"${t}" for t in alerted_tickers) if alerted_tickers else ""
         msg = (
             f"📋 <b>SEC Insider Bot — Run Complete</b>\n"
-            f"Sent <b>{alert_count}</b> alert(s). "
+            f"🚨 <b>{alert_count} alert(s) sent:{tickers_str}</b>\n"
             f"{skip_count} filtered out, {error_count} data error(s)."
         )
 
     if notable_cluster_distress:
         msg += "\n\n⚡ <b>Notable cluster despite distress (5+ insiders, Z &lt; 1.50):</b>"
         for ticker, cluster, z, cap_m in sorted(notable_cluster_distress, key=lambda x: -x[1]):
-            msg += f"\n  • ${ticker} — {cluster} insiders, Z={z:.2f}, ${cap_m:.1f}M cap"
+            msg += f"\n  • ${ticker} — {cluster} insiders, Z={z:.2f}, {_fmt_money(cap_m * 1e6)} cap"
 
     if solo_near_misses:
         msg += "\n\n👤 <b>Large solo insider buys ≥$250K (no cluster — check manually):</b>"
         for ticker, name, role, value, price, cap_m in sorted(solo_near_misses, key=lambda x: -x[3]):
-            msg += f"\n  • ${ticker} — {name} ({role}): ${value:,.0f} @ ${price:.2f} | ${cap_m:.1f}M cap"
+            msg += f"\n  • ${ticker} — {name} ({role}): {_fmt_money(value)} @ ${price:.2f} | {_fmt_money(cap_m * 1e6)} cap"
 
     if score_near_misses:
         msg += "\n\n📉 <b>Below score threshold (passed all checks, score &lt; 45):</b>"
         for ticker, score, cluster, cap_m in sorted(score_near_misses, key=lambda x: -x[1]):
-            msg += f"\n  • ${ticker} — {score}/80, {cluster} insiders, ${cap_m:.1f}M cap"
+            msg += f"\n  • ${ticker} — {score}/80, {cluster} insiders, {_fmt_money(cap_m * 1e6)} cap"
 
     if near_misses:
         msg += "\n\n⚠️ <b>Near-misses (Z 1.50–1.81 — check manually):</b>"
         for ticker, z, cluster, cap_m in near_misses:
-            msg += f"\n  • ${ticker} — Z={z:.2f}, {cluster} insiders, ${cap_m:.1f}M cap"
+            msg += f"\n  • ${ticker} — Z={z:.2f}, {cluster} insiders, {_fmt_money(cap_m * 1e6)} cap"
+
+    if sale_alerts:
+        msg += "\n\n🔴 <b>Notable insider sales:</b>"
+        for ticker, data in sorted(sale_alerts.items(), key=lambda x: -x[1]["transactions"][0]["total_value"]):
+            cap = _fmt_money(data["market_cap"])
+            if data["cluster_size"] >= 2:
+                total_sold = sum(t["total_value"] for t in data["transactions"])
+                msg += f"\n  • ${ticker} — {data['cluster_size']} insiders, {_fmt_money(total_sold)} sold | {cap} cap"
+            else:
+                txn = data["transactions"][0]
+                role = txn["officer_title"] or ("Director" if txn["is_director"] else "Insider")
+                pos_pct = txn["shares_sold"] / txn["shares_before"] * 100 if txn["shares_before"] > 0 else 100
+                msg += (
+                    f"\n  • ${ticker} — {txn['filer_name']} ({role}): "
+                    f"{_fmt_money(txn['total_value'])} | -{pos_pct:.0f}% of position | {cap} cap"
+                )
 
     url = TELEGRAM_API.format(token=token)
     try:
@@ -156,7 +174,9 @@ def send_sale_alert(ticker, ticker_data):
 
 
 def _fmt_money(value):
-    """Format a dollar value compactly: $21.8M, $268.8K, etc."""
+    """Format a dollar value compactly: $1.2B, $21.8M, $268.8K, etc."""
+    if value >= 1_000_000_000:
+        return f"${value/1_000_000_000:.1f}B"
     if value >= 1_000_000:
         return f"${value/1_000_000:.1f}M"
     if value >= 1_000:
